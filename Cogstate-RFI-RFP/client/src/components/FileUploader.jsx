@@ -10,6 +10,7 @@ export default function FileUploader() {
   const [dragActive, setDragActive] = useState(false);
   const [uploadedFile, setUploadedFile] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadError, setUploadError] = useState(null);
 
   const validTypes = [
     'application/pdf',
@@ -49,8 +50,13 @@ export default function FileUploader() {
   };
 
   const handleFileSelection = (file) => {
+    // Clear previous errors
+    setUploadError(null);
+
     if (!validTypes.includes(file.type)) {
-      alert('Invalid file type! Please upload PDF, Word, Excel or Markdown files.');
+      const error = 'Invalid file type! Please upload PDF, Word, Excel or Markdown files.';
+      setUploadError(error);
+      alert(error);
       return;
     }
 
@@ -58,27 +64,89 @@ export default function FileUploader() {
     try {
       validateFileSize(file);
     } catch (error) {
+      setUploadError(error.message);
       alert(error.message);
       return;
     }
     
     setUploadedFile(file);
-    console.log('File info:', getSerializableFileInfo(file));
+    console.log('File selected:', getSerializableFileInfo(file));
   };
 
   const handleUploadAndProcess = async () => {
     if (!uploadedFile) return;
 
     setIsUploading(true);
+    setUploadError(null);
     
     try {
+      console.log('Starting upload process...');
+      console.log('File details:', getSerializableFileInfo(uploadedFile));
+      
       const response = await uploadFileApi(uploadedFile, 'test');
+      
+      console.log('Upload successful! Response:', response);
+      
+      // Validate response structure
+      if (!response) {
+        throw new Error('No response received from server');
+      }
+      
+      if (!response.id) {
+        console.error('Response missing ID field:', response);
+        throw new Error('Invalid response from server - missing document ID');
+      }
+      
+      // Store response and navigate
       localStorage.setItem(`response_${response.id}`, JSON.stringify(response));
+      console.log(`Stored response with ID: ${response.id}`);
       navigate(`/response/${response.id}`);
+      
     } catch (error) {
-      console.error('Upload failed:', error);
-      localStorage.setItem(`response_${mockData.id}`, JSON.stringify(mockData));
-      navigate(`/response/${mockData.id}`);
+      console.error('Upload failed with error:', error);
+      
+      let errorMessage = 'Upload failed. ';
+      
+      if (error.response) {
+        // Server responded with error status
+        const status = error.response.status;
+        const data = error.response.data;
+        
+        if (status === 413) {
+          errorMessage += 'File too large. Please try a smaller file.';
+        } else if (status === 400) {
+          errorMessage += data?.message || 'Invalid file or request.';
+        } else if (status === 500) {
+          errorMessage += 'Server error. Please try again later.';
+        } else {
+          errorMessage += `Server error (${status}). Please try again.`;
+        }
+      } else if (error.request) {
+        // Network error
+        errorMessage += 'Network error. Please check your connection and try again.';
+      } else {
+        // Other error
+        errorMessage += error.message || 'Unknown error occurred.';
+      }
+      
+      setUploadError(errorMessage);
+      
+      // Show error to user
+      alert(errorMessage);
+      
+      // Only use mock data in development environment
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('Development mode: Using mock data as fallback');
+        
+        const shouldUseMock = window.confirm(
+          'Upload failed. Would you like to use mock data for testing? (Development mode only)'
+        );
+        
+        if (shouldUseMock) {
+          localStorage.setItem(`response_${mockData.id}`, JSON.stringify(mockData));
+          navigate(`/response/${mockData.id}`);
+        }
+      }
     } finally {
       setIsUploading(false);
     }
@@ -86,6 +154,7 @@ export default function FileUploader() {
 
   const removeFile = () => {
     setUploadedFile(null);
+    setUploadError(null);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -95,16 +164,24 @@ export default function FileUploader() {
     <div className="bg-white pt-8 pb-12 px-10">
       <h1 className="text-xl font-bold text-primary mb-8">Upload New RFI/RFP Request Document</h1>
       
+      {/* Error display */}
+      {uploadError && (
+        <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+          <p className="text-red-800 text-sm">{uploadError}</p>
+        </div>
+      )}
+      
       {/* Loading Overlay */}
       {isUploading && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-8 text-center max-w-md mx-4">
             <Loader2 className="w-12 h-12 animate-spin text-blue-600 mx-auto mb-4" />
             <h3 className="text-lg font-semibold text-gray-900 mb-2">Processing Your Document</h3>
-            <p className="text-gray-600 mb-4">Please wait while we analyze your RFI/RFP document...</p>
+            <p className="text-gray-600 mb-4">Please wait while we analyze your RFI/RFP document. Complex documents may take 5-15 minutes to process...</p>
             <div className="w-full bg-gray-200 rounded-full h-2">
               <div className="bg-blue-600 h-2 rounded-full animate-pulse" style={{ width: '60%' }}></div>
             </div>
+            <p className="text-sm text-gray-500 mt-2">Processing questions and generating AI responses...</p>
           </div>
         </div>
       )}
@@ -130,6 +207,9 @@ export default function FileUploader() {
             <p className="text-sm font-medium text-secondary">Click to select a file</p>
             <p className="text-sm text-secondary mb-4">or drag and drop</p>
             <p className="text-xs text-gray-500 italic">Maximum file size is 10 MB</p>
+            <p className="text-xs text-gray-500 italic mt-1">
+              Supported: PDF, Word (.doc, .docx), Excel (.xls, .xlsx), Markdown (.md)
+            </p>
             
             <input
               ref={fileInputRef}
@@ -156,7 +236,7 @@ export default function FileUploader() {
                       {uploadedFile.name}
                     </p>
                     <p className="text-xs text-gray-500">
-                      {Math.round(uploadedFile.size / 1024)} KB
+                      {Math.round(uploadedFile.size / 1024)} KB • {uploadedFile.type}
                     </p>
                   </div>
                   <button 
@@ -183,7 +263,9 @@ export default function FileUploader() {
             className={`flex items-center gap-2 py-2 px-10 rounded-full font-medium text-xs uppercase transition-colors ${
               isUploading
                 ? 'bg-gray-400 text-gray-600 cursor-not-allowed'
-                : 'bg-secondary text-white hover:bg-blue-700'
+                : uploadedFile
+                ? 'bg-secondary text-white hover:bg-blue-700'
+                : 'bg-gray-300 text-gray-500 cursor-not-allowed'
             }`}
             disabled={!uploadedFile || isUploading}
           >
