@@ -3,7 +3,7 @@ import axios from 'axios';
 // Create axios instance with base URL
 const axiosInstance = axios.create({
   baseURL: 'https://cogstatebackend-677861082546.us-central1.run.app',
-  timeout: 1000000,
+  timeout: 3600000,
 });
 
 // Request interceptor
